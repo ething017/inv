@@ -17,6 +17,7 @@ export const requireAdmin = (req, res, next) => {
 // Legacy permission check for backward compatibility
 export const checkPermission = (permission) => {
   return (req, res, next) => {
+    // SUPER ADMIN BYPASS: If user is admin, grant access to everything
     if (req.session.user.role === 'admin') {
       return next();
     }
@@ -33,6 +34,7 @@ export const checkPermission = (permission) => {
 export const requirePermission = (module, action) => {
   return async (req, res, next) => {
     try {
+      // SUPER ADMIN BYPASS: If user is admin, grant access to everything
       if (req.session.user.role === 'admin') {
         return next();
       }
@@ -64,17 +66,25 @@ export const requirePermission = (module, action) => {
 
 // Helper middleware to load user permissions into session
 export const loadUserPermissions = async (req, res, next) => {
-  if (req.session.user && req.session.user.role !== 'admin') {
-    try {
-      const { default: User } = await import('../models/User.js');
-      const user = await User.findById(req.session.user.id);
-      
-      if (user) {
-        const permissions = await user.getAllPermissions();
-        req.session.user.detailedPermissions = permissions;
+  if (req.session.user) {
+    // SUPER ADMIN BYPASS: If user is admin, they have all permissions
+    if (req.session.user.role === 'admin') {
+      req.session.user.detailedPermissions = 'ALL'; // Special marker for admin
+      return next();
+    }
+    
+    if (req.session.user.role !== 'admin') {
+      try {
+        const { default: User } = await import('../models/User.js');
+        const user = await User.findById(req.session.user.id);
+        
+        if (user) {
+          const permissions = await user.getAllPermissions();
+          req.session.user.detailedPermissions = permissions;
+        }
+      } catch (error) {
+        console.error('Error loading user permissions:', error);
       }
-    } catch (error) {
-      console.error('Error loading user permissions:', error);
     }
   }
   next();
@@ -84,7 +94,16 @@ export const loadUserPermissions = async (req, res, next) => {
 export const requireModuleAccess = (module) => {
   return async (req, res, next) => {
     try {
+      // SUPER ADMIN BYPASS: If user is admin, grant access to everything
       if (req.session.user.role === 'admin') {
+        // Set full permissions for admin
+        req.userPermissionLevel = {
+          canViewOwn: true,
+          canViewAll: true,
+          canCreate: true,
+          canUpdate: true,
+          canDelete: true
+        };
         return next();
       }
 
@@ -120,4 +139,23 @@ export const requireModuleAccess = (module) => {
       return res.redirect('/dashboard');
     }
   };
+};
+
+// New middleware specifically for super admin operations
+export const requireSuperAdmin = (req, res, next) => {
+  if (!req.session.user || req.session.user.role !== 'admin') {
+    req.flash('error', 'هذه العملية تتطلب صلاحيات مدير النظام الرئيسي');
+    return res.redirect('/dashboard');
+  }
+  next();
+};
+
+// Middleware to check if user can access system-wide features
+export const requireSystemAccess = (req, res, next) => {
+  // Only admins can access system-wide features
+  if (!req.session.user || req.session.user.role !== 'admin') {
+    req.flash('error', 'ليس لديك صلاحية للوصول إلى إعدادات النظام');
+    return res.redirect('/dashboard');
+  }
+  next();
 };
